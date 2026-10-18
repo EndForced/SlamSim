@@ -1,10 +1,16 @@
-# Релиз по тегу: git tag v0.1.0 && git push origin v0.1.0
+# Релиз по тегу (git tag v0.1.0 && git push origin v0.1.0) или вручную:
+# Actions → release → Run workflow → версия. При ручном запуске тег создаётся на текущем коммите.
 # Собирает бинарники для всех платформ (scripts/release.sh) и публикует GitHub Release.
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версия релиза, например v0.1.0"
+        required: true
 
 permissions:
   contents: write
@@ -12,7 +18,13 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version || github.ref_name }}
     steps:
+      - name: Проверка версии
+        run: |
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "версия должна быть вида v1.2.3, получено: $VERSION"; exit 1; }
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
@@ -23,7 +35,7 @@ jobs:
         run: go vet ./... && go test ./...
 
       - name: Сборка архивов
-        run: scripts/release.sh "${GITHUB_REF_NAME}"
+        run: scripts/release.sh "${VERSION}"
 
       - name: Публикация релиза
         env:
@@ -34,12 +46,12 @@ jobs:
 
           | Система | Архив |
           |---|---|
-          | Windows | \`slamsim_${GITHUB_REF_NAME}_windows_amd64.zip\` |
-          | macOS (Apple Silicon) | \`slamsim_${GITHUB_REF_NAME}_darwin_arm64.tar.gz\` |
-          | macOS (Intel) | \`slamsim_${GITHUB_REF_NAME}_darwin_amd64.tar.gz\` |
-          | Linux | \`slamsim_${GITHUB_REF_NAME}_linux_amd64.tar.gz\` |
+          | Windows | \`slamsim_${VERSION}_windows_amd64.zip\` |
+          | macOS (Apple Silicon) | \`slamsim_${VERSION}_darwin_arm64.tar.gz\` |
+          | macOS (Intel) | \`slamsim_${VERSION}_darwin_amd64.tar.gz\` |
+          | Linux | \`slamsim_${VERSION}_linux_amd64.tar.gz\` |
           | Raspberry Pi и др. ARM | \`linux_arm64\` (64-бит) или \`linux_armv7\` (32-бит) |
-          | Только Python-клиент | \`rrosim_${GITHUB_REF_NAME}_python.zip\` |
+          | Только Python-клиент | \`rrosim_${VERSION}_python.zip\` |
 
           ## Запуск
 
@@ -53,7 +65,8 @@ jobs:
           macOS при первом запуске может не дать открыть файл неизвестного разработчика: откройте его через
           контекстное меню «Открыть» или выполните \`xattr -d com.apple.quarantine slamsim slamsim-generate\`.
           NOTES
-          gh release create "${GITHUB_REF_NAME}" dist/* \
-            --title "SlamSim ${GITHUB_REF_NAME}" \
+          gh release create "${VERSION}" dist/* \
+            --title "SlamSim ${VERSION}" \
+            --target "${GITHUB_SHA}" \
             --notes-file notes.md \
             --generate-notes

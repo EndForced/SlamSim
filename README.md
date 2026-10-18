@@ -652,6 +652,9 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
+Или без тега из консоли: на GitHub откройте **Actions → release → Run workflow** и введите версию
+(`v0.2.0`). Тег создастся на последнем коммите выбранной ветки.
+
 GitHub Actions прогоняет тесты, собирает архивы для Windows, macOS и Linux (amd64/arm64/armv7)
 скриптом `scripts/release.sh` и публикует их на странице Releases вместе с `SHA256SUMS.txt`.
 Локальная сборка тех же архивов: `scripts/release.sh v0.2.0`, результат — в `dist/`.
