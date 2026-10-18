@@ -109,7 +109,7 @@ function draw() {
   }
 
   ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,193,7,.95)';
-  state.sensor_cells.forEach(c => ctx.strokeRect((c % N) * S + 3, Math.floor(c / N) * S + 3, S - 6, S - 6));
+  (state.sensor_cells || []).forEach(c => ctx.strokeRect((c % N) * S + 3, Math.floor(c / N) * S + 3, S - 6, S - 6));
 
   const p = state.pose, cx = p.x * S + S / 2, cy = p.y * S + S / 2;
   const ang = { north: -Math.PI / 2, south: Math.PI / 2, east: 0, west: Math.PI }[p.heading];
@@ -117,7 +117,7 @@ function draw() {
   ctx.fillStyle = '#ffb300'; ctx.strokeStyle = '#111'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.roundRect(-24, -22, 48, 44, 8); ctx.fill(); ctx.stroke();
   ctx.fillStyle = '#111'; ctx.beginPath(); ctx.moveTo(22, 0); ctx.lineTo(4, -12); ctx.lineTo(4, 12); ctx.closePath(); ctx.fill();
-  state.carrying.forEach((col, i) => { ctx.fillStyle = col === 'red' ? '#e53935' : '#1e88e5'; ctx.fillRect(-18, -16 + i * 11, 18, 8); });
+  (state.carrying || []).forEach((col, i) => { ctx.fillStyle = col === 'red' ? '#e53935' : '#1e88e5'; ctx.fillRect(-18, -16 + i * 11, 18, 8); });
   ctx.restore();
 }
 
@@ -146,10 +146,10 @@ function render() {
       [`Камера ${n}`, `x=${c.x} y=${c.y} z=${c.z} pitch=${c.pitch} yaw=${c.yaw} fov=${c.fov} ${c.width}×${c.height}`]),
     ['Свет', s.config.lighting.lights.map(l => `(${l.x}, ${l.y}, ${l.z})×${l.intensity}`).join(' ') || '—'],
   ]);
-  rows(document.getElementById('tele'), s.telemetry.map(t => [t.key, t.value]));
+  rows(document.getElementById('tele'), (s.telemetry || []).map(t => [t.key, t.value]));
   const logs = document.getElementById('logs');
   const atBottom = logs.scrollTop + logs.clientHeight >= logs.scrollHeight - 4;
-  logs.innerHTML = s.logs.map(l => `<div class="${l.level}">${l.time} ${l.text.replace(/</g, '&lt;')}</div>`).join('');
+  logs.innerHTML = (s.logs || []).map(l => `<div class="${l.level}">${l.time} ${l.text.replace(/</g, '&lt;')}</div>`).join('');
   if (atBottom) logs.scrollTop = logs.scrollHeight;
   document.getElementById('err').textContent = s.last_error ? `Нелегальная команда: ${s.last_error.message}` : '';
   document.getElementById('conn').className = 'dot' + (s.client_connected ? ' on' : '');

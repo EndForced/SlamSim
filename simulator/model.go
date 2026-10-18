@@ -479,8 +479,10 @@ func (w *World) Scan(cfg Config) []Cell {
 }
 
 // SensorAbs — абсолютные клетки датчиков (для отрисовки в окне)
+// Всегда возвращает список, а не nil: у края поля все клетки датчиков могут оказаться
+// за полем, и в JSON должен уйти [], а не null.
 func (w *World) SensorAbs(cfg Config) []int {
-	var res []int
+	res := []int{}
 	for _, s := range cfg.SensorCells {
 		if c, ok := w.relative(s[0], s[1]); ok {
 			res = append(res, c)
