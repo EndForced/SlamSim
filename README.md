@@ -15,6 +15,7 @@
 ## Содержание
 
 - [Быстрый старт](#быстрый-старт)
+- [Установка и запуск сервера](#установка-и-запуск-сервера)
 - [Модель поля и робота](#модель-поля-и-робота)
 - [Библиотека rrosim](#библиотека-rrosim)
   - [Sim](#sim) · [Настройки](#настройки) · [Команды](#команды-робота) · [Датчики](#датчики-observation-и-cell)
@@ -58,6 +59,106 @@ def step(sim):
 
 sim.run()                                      # ждать нажатий кнопки
 ```
+
+## Установка и запуск сервера
+
+### 1. Установить Go и Python
+
+- Go 1.25 или новее: https://go.dev/dl/. Проверка: `go version`.
+- Python 3.9 или новее. Проверка: `python --version` (в Linux/macOS — `python3`).
+- Для `camera_array()` нужен numpy: `pip install numpy`. Остальная библиотека работает без зависимостей.
+
+### 2. Получить код
+
+```bash
+git clone https://github.com/EndForced/SlamSim.git
+cd SlamSim
+```
+
+### 3. Наполнить поля (по желанию)
+
+```bash
+go run ./cmd/generate        # спросит количество, например 10000
+```
+
+Поля дописываются в `data/pats.bin`. Если файл пуст, сервер генерирует поле на лету при каждом
+сбросе, но тогда `reset(index=...)` недоступен.
+
+### 4. Запустить сервер
+
+Для разработки:
+
+```bash
+go run ./cmd/slamsim
+```
+
+Или собрать бинарник один раз и запускать его:
+
+```bash
+go build -o slamsim ./cmd/slamsim       # в Windows: go build -o slamsim.exe ./cmd/slamsim
+./slamsim                               # в Windows: slamsim.exe
+```
+
+В консоли появится `Симулятор запущен: http://127.0.0.1:8080`. Откройте этот адрес в браузере:
+там окно симулятора.
+
+Флаги:
+
+| Флаг | По умолчанию | Описание |
+|---|---|---|
+| `-addr` | `127.0.0.1:8080` | Адрес и порт HTTP API и окна |
+| `-root` | `.` | Корень репозитория, где лежат `data/pats.bin` и `assets/`. Нужен, если бинарник запускается не из корня. |
+
+```bash
+./slamsim -addr 127.0.0.1:9000 -root ~/SlamSim
+```
+
+### 5. Подключить Python
+
+```bash
+pip install -e python        # из корня репозитория, один раз
+```
+
+Если ставить пакет не хочется, добавьте папку в путь в начале скрипта:
+
+```python
+import sys; sys.path.insert(0, "путь/к/SlamSim/python")
+```
+
+Проверка связи:
+
+```python
+from rrosim import Sim
+print(Sim().config())        # если сервер запущен, напечатается конфиг
+```
+
+### Сервер на другом компьютере
+
+Например, симулятор работает на ноутбуке, а код робота запускается на другой машине в той же сети.
+
+```bash
+./slamsim -addr 0.0.0.0:8080            # принимать подключения со всех интерфейсов
+```
+
+```python
+sim = Sim("http://192.168.1.50:8080")   # IP компьютера с сервером
+```
+
+Окно открывается с любого компьютера сети по тому же адресу. Авторизации у сервера нет, поэтому
+запускайте его на `0.0.0.0` только в доверенной сети. Если подключиться не удаётся, разрешите
+входящие соединения на порт в брандмауэре.
+
+### Если что-то не работает
+
+| Симптом | Причина и решение |
+|---|---|
+| `SimError: unavailable: симулятор недоступен` | Сервер не запущен или у `Sim(...)` другой адрес/порт |
+| `address already in use` при запуске | Порт занят, например вторым экземпляром. Закройте его или запустите с `-addr 127.0.0.1:9000` и `Sim("http://127.0.0.1:9000")`. |
+| В окне серые квадраты вместо клеток | Сервер не нашёл `assets/`: запустите из корня репозитория или укажите `-root` |
+| `reset_failed: в data/pats.bin нет полей` | Файл пуст: наполните его через `go run ./cmd/generate` или вызывайте `reset()` без `index` |
+| `satellite_disabled` | Функция режима спутника: сначала `sim.configure(satellite=True)` |
+| Индикатор клиента в окне серый | Python-скрипт не дошёл до `sim.run()` или упал, смотрите консоль скрипта |
+| Робот двигается медленно | Это пауза `step_delay_ms` (150 мс) для наглядности, для прогонов ставьте `sim.configure(step_delay_ms=0)` |
 
 ## Модель поля и робота
 
@@ -124,6 +225,28 @@ sim.reset(index=None, same=False) -> Observation   # новое поле
 `index` выбирает конкретное поле из файла, `same=True` перезапускает текущее с начальной позиции.
 При сбросе обнуляются баллы, секции и таймер.
 
+Примеры:
+
+```python
+from rrosim import Sim
+
+sim = Sim()
+
+# датчики: клетка впереди, две впереди, впереди-слева/справа; хардкор; быстрые команды
+cfg = sim.configure(sensor_cells=[(1, 0), (2, 0), (1, -1), (1, 1)],
+                    satellite=False, step_delay_ms=0)
+print(cfg["sensor_cells"])
+
+# поменять только одно поле камеры, остальные настройки сохранятся
+sim.configure(camera={"pitch": -45})
+print(sim.config()["camera"])
+
+obs = sim.reset()            # случайное поле
+obs = sim.reset(index=12)    # поле №12 из data/pats.bin (файл должен быть наполнен, см. cmd/generate)
+obs = sim.reset(same=True)   # заново то же поле
+print(obs.front, obs.score["total"])
+```
+
 ### Команды робота
 
 | Метод | Что делает | Типичные ошибки |
@@ -136,6 +259,48 @@ sim.reset(index=None, same=False) -> Observation   # новое поле
 | `scan()` | Показания датчиков без движения | — |
 
 Все методы возвращают `Observation`.
+
+Примеры:
+
+```python
+from rrosim import IllegalCommand
+
+obs = sim.forward()
+print(obs.sections, obs.front.kind)
+
+sim.left(); sim.left()          # разворот на 180°
+try:
+    sim.backward()              # шаг назад без поворота
+except IllegalCommand as e:
+    print("сзади не проехать:", e.code)
+
+# объехать препятствие: пробовать вперёд, иначе поворачивать направо
+for _ in range(4):
+    try:
+        sim.forward()
+        break
+    except IllegalCommand as e:
+        print("не проехал:", e.code)   # blocked / no_passage / out_of_field
+        sim.right()
+
+# снять трубу перед роботом
+try:
+    sim.pick()
+except IllegalCommand as e:
+    if e.code == "wrong_approach":
+        print("подъехать поперёк трубы")
+    else:
+        print("трубы нет:", e.code)    # no_tube, capacity
+
+# положить на зелёную подставку перед роботом (последнюю взятую трубу)
+try:
+    obs = sim.place()
+    print(obs.score)                   # {"total": ..., "finished": ...}
+except IllegalCommand as e:
+    print("не положил:", e.code)       # no_holder, empty, holder_busy, wrong_approach
+
+# при capacity > 1 можно выбрать цвет: sim.configure(capacity=2), затем sim.place(color="blue")
+```
 
 ### Датчики: Observation и Cell
 
@@ -164,12 +329,29 @@ obs.raw           # исходный JSON ответа
 | `tube_axis` | Для трубы: `across` — при текущем курсе робот стоит к ней поперёк и может её снять, если она прямо перед ним; `along` — нужно подъехать с другой стороны |
 | `id` | Сырой ID клетки модели `matrixfactory`, только в режиме спутника |
 
-Пример: проверить, можно ли снять трубу.
+Примеры:
 
 ```python
-f = sim.scan().front
+obs = sim.scan()
+
+# проверить, можно ли снять трубу
+f = obs.front
 if f and f.kind == "tube" and f.tube_axis == "across":
     sim.pick()
+
+# заехать на пандус, если он впереди и поднимается вперёд
+if f and f.kind == "ramp" and f.ramp_up == "forward":
+    try:
+        sim.forward()
+    except IllegalCommand as e:
+        print("на пандус не заехать:", e.message)
+
+# перебрать все клетки датчиков
+for c in obs.scan:
+    print(f"({c.f:+d},{c.r:+d}) {c.kind:8} ярус={c.level} цвет={c.color}")
+
+left = obs.at(1, -1)            # клетка впереди-слева
+print(left.kind if left else "нет такого датчика")
 ```
 
 Только в режиме спутника:
@@ -178,6 +360,22 @@ if f and f.kind == "tube" and f.tube_axis == "across":
 sim.map()        # {"cells": 8×8 Cell, "pose": {...}} — абсолютная карта, строки сверху вниз (с севера на юг)
 sim.reference()  # {"route": [[клетки], ...6 отрезков], "sections": эталон} — для отладки
 ```
+
+Пример: найти все трубы на карте и узнать эталон.
+
+```python
+sim.configure(satellite=True)
+m = sim.map()
+print("робот:", m["pose"])
+for y, row in enumerate(m["cells"]):
+    for x, c in enumerate(row):
+        if c["kind"] == "tube":
+            print(f"труба {c['color']} на ({x}, {y}), ярус {c['level']}")
+print("эталон:", sim.reference()["sections"], "секций")
+```
+
+Номер клетки в маршруте `reference()["route"]` — это `y * 8 + x`. Полный пример проезда по
+эталону — в `python/examples/follow_reference.py`.
 
 ### Камера и освещение
 
@@ -232,6 +430,25 @@ sim.configure(
 frame = sim.camera_array()        # дальше — OpenCV, свой детектор и т.п.
 ```
 
+Ещё примеры:
+
+```python
+sim.save_camera("robot.png")                       # кадр камеры робота в файл
+png = sim.camera()                                 # те же байты PNG в памяти
+
+sim.configure(satellite=True)
+sim.save_camera("top.png", view="satellite", size=800)   # вид сверху 800×800
+
+# доля красных пикселей в кадре — например, чтобы заметить красную трубу или границу
+import numpy as np
+f = sim.camera_array().astype(int)
+red = (f[..., 0] > 150) & (f[..., 1] < 80) & (f[..., 2] < 80)
+print(f"красного: {red.mean():.1%}")
+
+# камера смотрит строго вниз — удобно для следования по линии
+sim.configure(camera={"x": 0, "y": 0, "z": 150, "pitch": -90, "fov": 60, "width": 160, "height": 120})
+```
+
 Геометрия сцены взята из п. 15:
 - баннер 2440 мм, линии 20 мм, красная граница 80 мм вокруг баннера;
 - секции и пандусы 300×300×100: чёрная плёнка, белые линии 20 мм, на пандусе круги Ø80 (если смотреть на подъём, красный слева, синий справа);
@@ -268,6 +485,31 @@ sim.run()               # блокирует; Ctrl+C — выход
 зелёный индикатор «Python-клиент ждёт итерацию».
 
 `on_iteration` можно вызвать и как обычную функцию: `sim.on_iteration(step)`.
+
+Пример: каждое нажатие — один цикл «скан, решение, движение», с телеметрией.
+
+```python
+from rrosim import Sim, IllegalCommand
+
+sim = Sim()
+sim.configure(step_delay_ms=150)
+sim.telemetry(_clear=True)
+steps = 0
+
+@sim.on_iteration
+def step(sim):
+    global steps
+    steps += 1
+    obs = sim.scan()
+    sim.telemetry(step=steps, front=obs.front.kind, carrying=obs.carrying, score=obs.score["total"])
+    try:
+        sim.forward()
+    except IllegalCommand as e:
+        sim.log(f"шаг {steps}: {e.message}")
+        sim.right()
+
+sim.run()
+```
 
 ### Ошибки
 
