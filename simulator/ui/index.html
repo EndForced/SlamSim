@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Симулятор РРО</title>
+<style>
+  :root { --bg:#f4f5f7; --panel:#fff; --text:#1d2129; --muted:#6b7280; --line:#e2e5ea; --accent:#2563eb; --err:#c62828; --ok:#2e7d32; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui, sans-serif; }
+  main { display:flex; gap:16px; padding:16px; flex-wrap:wrap; }
+  .field { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  canvas { display:block; width:min(640px, calc(100vw - 58px)); height:auto; image-rendering:pixelated; }
+  aside { flex:1; min-width:300px; display:flex; flex-direction:column; gap:12px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 8px; }
+  button { font:inherit; padding:7px 12px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  td { padding:3px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  td:first-child { color:var(--muted); width:45%; }
+  #logs { height:200px; overflow:auto; font:12px/1.5 ui-monospace, monospace; }
+  .error { color:var(--err); } .client { color:var(--accent); }
+  #err { color:var(--err); font-weight:600; min-height:1.4em; }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; background:#bbb; }
+  .dot.on { background:var(--ok); }
+  .muted { color:var(--muted); font-size:12px; }
+  kbd { border:1px solid var(--line); border-radius:3px; padding:0 4px; font-size:12px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="field">
+    <canvas id="cv" width="640" height="640"></canvas>
+    <div id="err"></div>
+    <div class="muted">Ручное управление: <kbd>↑</kbd><kbd>↓</kbd> вперёд/назад, <kbd>←</kbd><kbd>→</kbd> поворот, <kbd>P</kbd> взять трубу, <kbd>O</kbd> положить</div>
+  </div>
+  <aside>
+    <section>
+      <div class="row">
+        <button class="primary" id="iterate">Новая итерация (скан + проезд)</button>
+        <button id="newField">Новое поле</button>
+        <button id="restart">Перезапуск</button>
+        <label><input type="checkbox" id="showRoute"> эталон</label>
+      </div>
+      <p class="muted" style="margin:8px 0 0"><span class="dot" id="conn"></span> <span id="connText"></span></p>
+    </section>
+    <section>
+      <h2>Камера</h2>
+      <div class="row" style="margin-bottom:8px">
+        <label><input type="radio" name="view" value="off" checked> выкл</label>
+        <label><input type="radio" name="view" value="robot"> робот</label>
+        <label><input type="radio" name="view" value="satellite"> спутник</label>
+      </div>
+      <img id="cam" alt="" style="display:none;max-width:100%;border-radius:4px">
+    </section>
+    <section><h2>Заезд</h2><table id="run"></table></section>
+    <section><h2>Телеметрия клиента</h2><table id="tele"></table></section>
+    <section><h2>Журнал</h2><div id="logs"></div></section>
+  </aside>
+</main>
+<script>
+const S = 80, N = 8;
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const img = {};
+for (let i = 0; i <= 30; i++) { const im = new Image(); im.src = `/assets/${i}.png`; img[i] = im; }
+let state = null;
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+  return r.json();
+}
+
+function tile(id, x, y) {
+  const im = img[id];
+  if (im && im.complete && im.naturalWidth) ctx.drawImage(im, x * S, y * S, S, S);
+  else { ctx.fillStyle = '#ccc'; ctx.fillRect(x * S, y * S, S, S); }
+}
+
+function draw() {
+  if (!state) return;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  state.cells.forEach((c, i) => {
+    const x = i % N, y = Math.floor(i / N);
+    if (c.id === 21 || c.id === 22) { // труба снята, белая подставка осталась
+      tile(c.id === 21 ? 1 : 2, x, y);
+      ctx.fillStyle = '#e8e8e8'; ctx.strokeStyle = '#999';
+      ctx.fillRect(x * S + 22, y * S + 22, S - 44, S - 44); ctx.strokeRect(x * S + 22, y * S + 22, S - 44, S - 44);
+    } else tile(c.id, x, y);
+    if (c.holder_color) {
+      ctx.fillStyle = c.holder_color === 'red' ? '#e53935' : '#1e88e5';
+      ctx.fillRect(x * S + 12, y * S + S / 2 - 8, S - 24, 16);
+    }
+  });
+
+  if (document.getElementById('showRoute').checked && state.route) {
+    ctx.lineWidth = 4; ctx.lineJoin = 'round';
+    const colors = ['#ff9800', '#9c27b0', '#00acc1', '#8bc34a', '#f06292', '#5c6bc0'];
+    state.route.forEach((seg, k) => {
+      ctx.strokeStyle = colors[k % colors.length]; ctx.beginPath();
+      seg.forEach((c, i) => {
+        const px = (c % N) * S + S / 2 + (k - 2.5) * 3, py = Math.floor(c / N) * S + S / 2 + (k - 2.5) * 3;
+        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      });
+      ctx.stroke();
+    });
+  }
+
+  ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,193,7,.95)';
+  state.sensor_cells.forEach(c => ctx.strokeRect((c % N) * S + 3, Math.floor(c / N) * S + 3, S - 6, S - 6));
+
+  const p = state.pose, cx = p.x * S + S / 2, cy = p.y * S + S / 2;
+  const ang = { north: -Math.PI / 2, south: Math.PI / 2, east: 0, west: Math.PI }[p.heading];
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
+  ctx.fillStyle = '#ffb300'; ctx.strokeStyle = '#111'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.roundRect(-24, -22, 48, 44, 8); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#111'; ctx.beginPath(); ctx.moveTo(22, 0); ctx.lineTo(4, -12); ctx.lineTo(4, 12); ctx.closePath(); ctx.fill();
+  state.carrying.forEach((col, i) => { ctx.fillStyle = col === 'red' ? '#e53935' : '#1e88e5'; ctx.fillRect(-18, -16 + i * 11, 18, 8); });
+  ctx.restore();
+}
+
+function rows(el, pairs) {
+  el.innerHTML = '';
+  for (const [k, v] of pairs) {
+    const tr = el.insertRow(); tr.insertCell().textContent = k;
+    tr.insertCell().textContent = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  }
+}
+
+function render() {
+  draw();
+  const s = state, sc = s.score;
+  rows(document.getElementById('run'), [
+    ['Поле', s.pattern_index >= 0 ? `№${s.pattern_index}` : 'сгенерировано'],
+    ['Время', `${Math.floor(s.elapsed_s / 60)}:${String(s.elapsed_s % 60).padStart(2, '0')}`],
+    ['Поза', `x=${s.pose.x} y=${s.pose.y} ${s.pose.heading}`],
+    ['Везёт', s.carrying.length ? s.carrying.join(', ') : '—'],
+    ['Секции / эталон', `${s.sections} / ${s.reference}`],
+    ['Команд', s.moves],
+    ['Баллы', `${sc.total}  (снятие ${sc.pick_points}, установка ${sc.place_points}, бонус ${sc.bonus}, логистика ${sc.logistics})`],
+    ['Режим', s.config.satellite ? 'со спутником' : 'хардкор (SLAM)'],
+    ['Датчики', JSON.stringify(s.config.sensor_cells)],
+    ['Камера', (c => `x=${c.x} y=${c.y} z=${c.z} pitch=${c.pitch} yaw=${c.yaw} fov=${c.fov} ${c.width}×${c.height}`)(s.config.camera)],
+    ['Свет', s.config.lighting.lights.map(l => `(${l.x}, ${l.y}, ${l.z})×${l.intensity}`).join(' ') || '—'],
+  ]);
+  rows(document.getElementById('tele'), s.telemetry.map(t => [t.key, t.value]));
+  const logs = document.getElementById('logs');
+  const atBottom = logs.scrollTop + logs.clientHeight >= logs.scrollHeight - 4;
+  logs.innerHTML = s.logs.map(l => `<div class="${l.level}">${l.time} ${l.text.replace(/</g, '&lt;')}</div>`).join('');
+  if (atBottom) logs.scrollTop = logs.scrollHeight;
+  document.getElementById('err').textContent = s.last_error ? `Нелегальная команда: ${s.last_error.message}` : '';
+  document.getElementById('conn').className = 'dot' + (s.client_connected ? ' on' : '');
+  document.getElementById('connText').textContent = s.client_connected ? 'Python-клиент ждёт итерацию' : 'Python-клиент не подключён (sim.run())';
+}
+
+// Кадр перерисовывается, только когда что-то поменялось (рендер идёт на сервере)
+let camKey = '', camBusy = false;
+function updateCamera() {
+  const view = document.querySelector('input[name=view]:checked').value;
+  const el = document.getElementById('cam');
+  el.style.display = view === 'off' ? 'none' : 'block';
+  if (view === 'off' || !state || camBusy) return;
+  const key = JSON.stringify([view, state.pose, state.moves, state.config, state.pattern_index, state.route && state.route[0]]);
+  if (key === camKey) return;
+  camKey = key; camBusy = true;
+  const next = new Image();
+  next.onload = next.onerror = () => { el.src = next.src; camBusy = false; };
+  next.src = `/api/camera?view=${view}&source=ui&t=${Date.now()}`;
+}
+document.querySelectorAll('input[name=view]').forEach(r => r.onchange = () => { camKey = ''; updateCamera(); });
+const hashView = new URLSearchParams(location.hash.slice(1)).get('camera');
+if (hashView) document.querySelectorAll('input[name=view]').forEach(r => r.checked = r.value === hashView);
+
+async function poll() {
+  try { state = await api('/api/state'); render(); updateCamera(); } catch (e) { console.error(e); }
+  setTimeout(poll, 200);
+}
+
+document.getElementById('iterate').onclick = () => api('/api/iterate', {});
+document.getElementById('newField').onclick = () => api('/api/reset', {});
+document.getElementById('restart').onclick = () => api('/api/reset', { same: true });
+document.getElementById('showRoute').onchange = draw;
+const keys = { ArrowUp: 'forward', ArrowDown: 'backward', ArrowLeft: 'left', ArrowRight: 'right', KeyP: 'pick', KeyO: 'place' };
+document.addEventListener('keydown', e => {
+  const cmd = keys[e.code];
+  if (!cmd || e.target.tagName === 'INPUT') return;
+  e.preventDefault();
+  api('/api/cmd', { cmd, source: 'ui' });
+});
+Object.values(img).forEach(im => im.onload = draw);
+poll();
+</script>
+</body>
+</html>

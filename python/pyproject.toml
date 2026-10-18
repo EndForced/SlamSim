@@ -1,0 +1,13 @@
+[project]
+name = "rrosim"
+version = "0.1.0"
+description = "Клиент симулятора «Ремонт труб» (РРО 2026)"
+requires-python = ">=3.9"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["rrosim"]
