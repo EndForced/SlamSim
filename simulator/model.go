@@ -7,6 +7,7 @@ import (
 	"SlamSim/matrixfactory"
 	"fmt"
 	"math"
+	"regexp"
 	"time"
 )
 
@@ -41,9 +42,11 @@ type Config struct {
 	// Задержка после каждой команды, чтобы движение было видно в окне симулятора
 	StepDelayMs int `json:"step_delay_ms"`
 
-	Camera   CameraConfig   `json:"camera"`
-	Lighting LightingConfig `json:"lighting"`
-	Scene    SceneConfig    `json:"scene"`
+	// Основная камера робота (имя "main") и дополнительные именованные камеры
+	Camera   CameraConfig            `json:"camera"`
+	Cameras  map[string]CameraConfig `json:"cameras"`
+	Lighting LightingConfig          `json:"lighting"`
+	Scene    SceneConfig             `json:"scene"`
 }
 
 func DefaultConfig() Config {
@@ -53,6 +56,7 @@ func DefaultConfig() Config {
 		Capacity:    1,
 		StepDelayMs: 150,
 		Camera:      DefaultCamera(),
+		Cameras:     map[string]CameraConfig{},
 		Lighting:    DefaultLighting(),
 		Scene:       DefaultScene(),
 	}
@@ -73,22 +77,19 @@ func (c Config) validate() error {
 	if c.StepDelayMs < 0 || c.StepDelayMs > 5000 {
 		return fmt.Errorf("step_delay_ms: допустимо 0..5000")
 	}
-	cam := c.Camera
-	switch {
-	case cam.FOV < 5 || cam.FOV > 170:
-		return fmt.Errorf("camera.fov: допустимо 5..170 градусов")
-	case cam.Width < 8 || cam.Width > 1920 || cam.Height < 8 || cam.Height > 1920:
-		return fmt.Errorf("camera.width/height: допустимо 8..1920")
-	case cam.AA < 1 || cam.AA > 4:
-		return fmt.Errorf("camera.aa: допустимо 1..4")
-	case cam.Pitch < -90 || cam.Pitch > 90:
-		return fmt.Errorf("camera.pitch: допустимо -90..90")
-	case cam.Noise < 0 || cam.Noise > 1:
-		return fmt.Errorf("camera.noise: допустимо 0..1")
-	case math.Abs(cam.K1) > 1:
-		return fmt.Errorf("camera.k1: допустимо -1..1")
-	case math.Abs(cam.X) > 500 || math.Abs(cam.Y) > 500 || cam.Z < 0 || cam.Z > 1000:
-		return fmt.Errorf("camera.x/y: ±500 мм, camera.z: 0..1000 мм")
+	if err := c.Camera.validate("camera"); err != nil {
+		return err
+	}
+	if len(c.Cameras) > MaxExtraCameras {
+		return fmt.Errorf("cameras: не больше %d дополнительных камер", MaxExtraCameras)
+	}
+	for name, cam := range c.Cameras {
+		if !cameraName.MatchString(name) || name == MainCamera {
+			return fmt.Errorf("cameras: имя %q — латиница, цифры, _ и -, до 32 символов, не %q", name, MainCamera)
+		}
+		if err := cam.validate("cameras." + name); err != nil {
+			return err
+		}
 	}
 	l := c.Lighting
 	if l.Ambient < 0 || l.Ambient > 2 || l.Specular < 0 || l.Specular > 5 || len(l.Lights) > 8 {
@@ -103,6 +104,40 @@ func (c Config) validate() error {
 		return fmt.Errorf("scene: высоты подставок 10..300 мм")
 	}
 	return nil
+}
+
+const MainCamera = "main"
+const MaxExtraCameras = 8
+
+var cameraName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
+
+func (cam CameraConfig) validate(prefix string) error {
+	switch {
+	case cam.FOV < 5 || cam.FOV > 170:
+		return fmt.Errorf("%s.fov: допустимо 5..170 градусов", prefix)
+	case cam.Width < 8 || cam.Width > 1920 || cam.Height < 8 || cam.Height > 1920:
+		return fmt.Errorf("%s.width/height: допустимо 8..1920", prefix)
+	case cam.AA < 1 || cam.AA > 4:
+		return fmt.Errorf("%s.aa: допустимо 1..4", prefix)
+	case cam.Pitch < -90 || cam.Pitch > 90:
+		return fmt.Errorf("%s.pitch: допустимо -90..90", prefix)
+	case cam.Noise < 0 || cam.Noise > 1:
+		return fmt.Errorf("%s.noise: допустимо 0..1", prefix)
+	case math.Abs(cam.K1) > 1:
+		return fmt.Errorf("%s.k1: допустимо -1..1", prefix)
+	case math.Abs(cam.X) > 500 || math.Abs(cam.Y) > 500 || cam.Z < 0 || cam.Z > 1000:
+		return fmt.Errorf("%s.x/y: ±500 мм, %s.z: 0..1000 мм", prefix, prefix)
+	}
+	return nil
+}
+
+// cameraByName возвращает настройки камеры: "main" (или "") — основная, иначе из Cameras
+func (c Config) cameraByName(name string) (CameraConfig, bool) {
+	if name == "" || name == MainCamera {
+		return c.Camera, true
+	}
+	cam, ok := c.Cameras[name]
+	return cam, ok
 }
 
 // CommandError — нелегальная команда. Состояние симулятора при этом не меняется.

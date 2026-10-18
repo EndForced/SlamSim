@@ -108,3 +108,38 @@ func TestSensorFrame(t *testing.T) {
 		t.Fatal("клетка «вправо» при курсе на восток должна быть южной")
 	}
 }
+
+// Робот въезжает на пандус каждого направления снизу, выезжает на секцию и съезжает обратно
+func TestDriveOverEveryRampType(t *testing.T) {
+	up := map[uint8]int{3: north, 4: south, 5: east, 6: west}
+	done := map[uint8]bool{}
+	for seed := uint64(0); seed < 500 && len(done) < 4; seed++ {
+		w := newTestWorld(t, seed*13)
+		for c := 0; c < N*N; c++ {
+			id := w.base[c]
+			d, ok := up[id]
+			if !ok || done[id] {
+				continue
+			}
+			foot, okF := w.neighbour(c, opposite(d))
+			top, okT := w.neighbour(c, d)
+			if !okF || !okT || w.base[foot] != 1 || w.base[top] != 2 {
+				continue
+			}
+			w.pos, w.heading = foot, d
+			steps := []func() error{w.Forward, w.Forward, w.TurnLeft, w.TurnLeft, w.Forward, w.Forward}
+			for i, step := range steps {
+				if err := step(); err != nil {
+					t.Fatalf("пандус %d (seed %d), шаг %d: %v", id, seed*13, i, err)
+				}
+			}
+			if w.pos != foot {
+				t.Fatalf("пандус %d: робот вернулся не на перекрёсток у подножия", id)
+			}
+			done[id] = true
+		}
+	}
+	if len(done) != 4 {
+		t.Fatalf("проверены не все пандусы: %v", done)
+	}
+}

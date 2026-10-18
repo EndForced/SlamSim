@@ -25,11 +25,12 @@ import json
 import time
 import traceback
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-__all__ = ["Sim", "Cell", "Observation", "SimError", "IllegalCommand"]
+__all__ = ["Sim", "Camera", "Cell", "Observation", "SimError", "IllegalCommand"]
 
 
 class SimError(Exception):
@@ -99,6 +100,48 @@ class Observation:
         )
 
 
+class Camera:
+    """Одна камера робота. Экземпляров может быть сколько угодно, у каждого свои настройки:
+
+        front = sim.get_camera()                       # основная
+        rear = sim.add_camera("rear", yaw=180)         # назад
+        left = sim.add_camera("left", yaw=-90, fov=90)
+        frames = {c.name: c.array() for c in (front, rear, left)}
+    """
+
+    def __init__(self, sim: "Sim", name: str = "main"):
+        self.sim = sim
+        self.name = name
+
+    def __repr__(self) -> str:
+        return f"Camera({self.name!r})"
+
+    def configure(self, **params) -> dict:
+        """Изменить переданные поля камеры, остальные остаются."""
+        if self.name == "main":
+            return self.sim.configure(camera=params)["camera"]
+        return self.sim.configure(cameras={self.name: params})["cameras"][self.name]
+
+    def config(self) -> dict:
+        return self.sim.cameras()[self.name]
+
+    def frame(self) -> bytes:
+        """PNG-кадр."""
+        return self.sim.camera(name=self.name)
+
+    def array(self):
+        """Кадр как numpy-массив H×W×3 (uint8, RGB)."""
+        return self.sim.camera_array(name=self.name)
+
+    def save(self, path: str) -> None:
+        self.sim.save_camera(path, name=self.name)
+
+    def remove(self) -> None:
+        if self.name == "main":
+            raise SimError("bad_config", "основную камеру удалить нельзя")
+        self.sim.remove_camera(self.name)
+
+
 class Sim:
     def __init__(self, url: str = "http://127.0.0.1:8080", timeout: float = 70):
         self.url = url.rstrip("/")
@@ -133,7 +176,7 @@ class Sim:
 
     def configure(self, sensor_cells=None, satellite=None, capacity=None, step_delay_ms=None,
                   camera: Optional[dict] = None, lighting: Optional[dict] = None,
-                  scene: Optional[dict] = None) -> dict:
+                  scene: Optional[dict] = None, cameras: Optional[dict] = None) -> dict:
         """Меняет только переданные настройки. sensor_cells — список (вперёд, вправо).
 
         camera:   x, y, z (мм от центра клетки: вперёд, вправо, вверх), pitch (к плоскости поля,
@@ -143,8 +186,12 @@ class Sim:
                   поля: x на восток, y на юг, z вверх, (0,0) — центр северо-западного перекрёстка,
                   перекрёсток (col,row) = (280·col, 280·row)
         scene:    stand_height, holder_height — высота низа трубы над поверхностью, мм
+        cameras:  дополнительные камеры {"имя": {поля как у camera} или None — удалить};
+                  новая камера начинается с настроек по умолчанию. Удобнее — add_camera().
         """
         body: dict = {}
+        if cameras is not None:
+            body["cameras"] = cameras
         if camera is not None:
             body["camera"] = camera
         if lighting is not None:
@@ -196,23 +243,59 @@ class Sim:
         """Положить трубу на зелёную подставку перед роботом (по умолчанию — последнюю взятую)."""
         return self._cmd("place", **({"color": color} if color else {}))
 
-    def camera(self, view: str = "robot", size: Optional[int] = None) -> bytes:
-        """PNG-кадр камеры робота (view="robot") или «спутника» (view="satellite", нужен satellite=True)."""
-        path = f"/api/camera?view={view}" + (f"&size={size}" if size else "")
-        return self._request("GET", path, raw=True)[0]
+    @staticmethod
+    def _camera_path(view: str, size: Optional[int], name: Optional[str], fmt: str) -> str:
+        q = {"view": view, "format": fmt}
+        if size:
+            q["size"] = str(size)
+        if name:
+            q["name"] = name
+        return "/api/camera?" + urllib.parse.urlencode(q)
 
-    def camera_array(self, view: str = "robot", size: Optional[int] = None):
+    def camera(self, view: str = "robot", size: Optional[int] = None, name: Optional[str] = None) -> bytes:
+        """PNG-кадр камеры робота (view="robot", name — имя камеры, по умолчанию основная "main")
+        или «спутника» (view="satellite", нужен satellite=True)."""
+        return self._request("GET", self._camera_path(view, size, name, "png"), raw=True)[0]
+
+    def camera_array(self, view: str = "robot", size: Optional[int] = None, name: Optional[str] = None):
         """Кадр как numpy-массив H×W×3 (uint8, RGB). Требует numpy."""
         import numpy as np
 
-        path = f"/api/camera?view={view}&format=raw" + (f"&size={size}" if size else "")
-        data, headers = self._request("GET", path, raw=True)
+        data, headers = self._request("GET", self._camera_path(view, size, name, "raw"), raw=True)
         h, w = int(headers["X-Height"]), int(headers["X-Width"])
         return np.frombuffer(data, dtype=np.uint8).reshape(h, w, 3)
 
-    def save_camera(self, path: str, view: str = "robot", size: Optional[int] = None) -> None:
+    def save_camera(self, path: str, view: str = "robot", size: Optional[int] = None,
+                    name: Optional[str] = None) -> None:
         with open(path, "wb") as f:
-            f.write(self.camera(view, size))
+            f.write(self.camera(view, size, name))
+
+    # --- несколько камер ---
+
+    def add_camera(self, name: str, **params) -> "Camera":
+        """Добавить (или обновить) именованную камеру робота и вернуть объект для работы с ней.
+
+        params — поля камеры (x, y, z, pitch, yaw, roll, fov, width, height, aa, noise, k1);
+        не переданные поля берутся по умолчанию. Имя: латиница, цифры, _ и -, не "main".
+        Кроме основной можно держать до 8 камер.
+        """
+        self.configure(cameras={name: params})
+        return Camera(self, name)
+
+    def get_camera(self, name: str = "main") -> "Camera":
+        """Объект уже существующей камеры ("main" — основная)."""
+        if name not in self.cameras():
+            raise SimError("unknown_camera", f"нет камеры {name!r}")
+        return Camera(self, name)
+
+    def remove_camera(self, name: str) -> None:
+        """Удалить дополнительную камеру."""
+        self.configure(cameras={name: None})
+
+    def cameras(self) -> dict:
+        """Все камеры робота: {"main": {...}, "rear": {...}, ...}."""
+        cfg = self.config()
+        return {"main": cfg["camera"], **(cfg.get("cameras") or {})}
 
     def map(self) -> dict:
         """Карта целиком — только в режиме спутника (configure(satellite=True))."""

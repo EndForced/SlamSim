@@ -244,37 +244,21 @@ var Tiles = map[uint8]FieldPoint{
 	},
 
 	3: {
-		Name: "Рампа заезжающая на север",
-		IDX:  3,
-		ConNorth: []ConnectionType{
-			// ConCeilCeil,
-			ConCeilRampN,
-			ConCeilTubeHorizon,
-		},
-		ConSouth: []ConnectionType{
-			// ConFloorFloor,
-			ConFloorRampS,
-			// ConFloorTubeHorizon,
-		},
-		ConEast: []ConnectionType{NoCon},
-		ConWest: []ConnectionType{NoCon},
+		Name:     "Рампа заезжающая на север",
+		IDX:      3,
+		ConNorth: []ConnectionType{ConCeilRampS, ConCeilTubeHorizon},
+		ConSouth: []ConnectionType{ConFloorRampN},
+		ConEast:  []ConnectionType{NoCon},
+		ConWest:  []ConnectionType{NoCon},
 	},
 
 	4: {
-		Name: "Рампа заезжающая на юг",
-		IDX:  4,
-		ConNorth: []ConnectionType{
-			// ConFloorFloor,
-			ConFloorRampN,
-			// ConFloorTubeHorizon,
-		},
-		ConSouth: []ConnectionType{
-			// ConCeilCeil,
-			ConCeilRampS,
-			ConCeilTubeHorizon,
-		},
-		ConEast: []ConnectionType{NoCon},
-		ConWest: []ConnectionType{NoCon},
+		Name:     "Рампа заезжающая на юг",
+		IDX:      4,
+		ConNorth: []ConnectionType{ConFloorRampS},
+		ConSouth: []ConnectionType{ConCeilRampN, ConCeilTubeHorizon},
+		ConEast:  []ConnectionType{NoCon},
+		ConWest:  []ConnectionType{NoCon},
 	},
 
 	5: {
@@ -282,16 +266,8 @@ var Tiles = map[uint8]FieldPoint{
 		IDX:      5,
 		ConNorth: []ConnectionType{NoCon},
 		ConSouth: []ConnectionType{NoCon},
-		ConEast: []ConnectionType{
-			// ConCeilCeil,
-			ConCeilRampW,
-			ConCeilTubeVertical,
-		},
-		ConWest: []ConnectionType{
-			// ConFloorFloor,
-			ConFloorRampE,
-			// ConFloorTubeVertical,
-		},
+		ConEast:  []ConnectionType{ConCeilRampW, ConCeilTubeVertical},
+		ConWest:  []ConnectionType{ConFloorRampE},
 	},
 
 	6: {
@@ -299,16 +275,8 @@ var Tiles = map[uint8]FieldPoint{
 		IDX:      6,
 		ConNorth: []ConnectionType{NoCon},
 		ConSouth: []ConnectionType{NoCon},
-		ConEast: []ConnectionType{
-			// ConFloorFloor,
-			ConFloorRampE,
-			// ConFloorTubeVertical,
-		},
-		ConWest: []ConnectionType{
-			// ConCeilCeil,
-			ConCeilRampW,
-			ConCeilTubeVertical,
-		},
+		ConEast:  []ConnectionType{ConFloorRampW},
+		ConWest:  []ConnectionType{ConCeilRampE, ConCeilTubeVertical},
 	},
 
 	7: {
@@ -403,36 +371,20 @@ var Tiles = map[uint8]FieldPoint{
 		Name:     "Рампа с робтом, заезжающая на север",
 		IDX:      13,
 		HasRobot: true,
-		ConNorth: []ConnectionType{
-			ConCeilCeil,
-			ConCeilRampN,
-			ConCeilTubeHorizon,
-		},
-		ConSouth: []ConnectionType{
-			ConFloorFloor,
-			ConFloorRampS,
-			ConFloorTubeHorizon,
-		},
-		ConEast: []ConnectionType{NoCon},
-		ConWest: []ConnectionType{NoCon},
+		ConNorth: []ConnectionType{ConCeilRampS, ConCeilTubeHorizon},
+		ConSouth: []ConnectionType{ConFloorRampN},
+		ConEast:  []ConnectionType{NoCon},
+		ConWest:  []ConnectionType{NoCon},
 	},
 
 	14: {
 		Name:     "Рампа с роботом заезжающая на юг",
 		IDX:      14,
 		HasRobot: true,
-		ConNorth: []ConnectionType{
-			ConFloorFloor,
-			ConFloorRampN,
-			ConFloorTubeHorizon,
-		},
-		ConSouth: []ConnectionType{
-			ConCeilCeil,
-			ConCeilRampS,
-			ConCeilTubeHorizon,
-		},
-		ConEast: []ConnectionType{NoCon},
-		ConWest: []ConnectionType{NoCon},
+		ConNorth: []ConnectionType{ConFloorRampS},
+		ConSouth: []ConnectionType{ConCeilRampN, ConCeilTubeHorizon},
+		ConEast:  []ConnectionType{NoCon},
+		ConWest:  []ConnectionType{NoCon},
 	},
 
 	15: {
@@ -441,16 +393,8 @@ var Tiles = map[uint8]FieldPoint{
 		HasRobot: true,
 		ConNorth: []ConnectionType{NoCon},
 		ConSouth: []ConnectionType{NoCon},
-		ConEast: []ConnectionType{
-			ConCeilCeil,
-			ConCeilRampE,
-			ConCeilTubeVertical,
-		},
-		ConWest: []ConnectionType{
-			ConFloorFloor,
-			ConFloorRampW,
-			ConFloorTubeVertical,
-		},
+		ConEast:  []ConnectionType{ConCeilRampW, ConCeilTubeVertical},
+		ConWest:  []ConnectionType{ConFloorRampE},
 	},
 
 	16: {
@@ -459,16 +403,8 @@ var Tiles = map[uint8]FieldPoint{
 		HasRobot: true,
 		ConNorth: []ConnectionType{NoCon},
 		ConSouth: []ConnectionType{NoCon},
-		ConEast: []ConnectionType{
-			ConFloorFloor,
-			ConFloorRampE,
-			ConFloorTubeVertical,
-		},
-		ConWest: []ConnectionType{
-			ConCeilCeil,
-			ConCeilRampW,
-			ConCeilTubeVertical,
-		},
+		ConEast:  []ConnectionType{ConFloorRampW},
+		ConWest:  []ConnectionType{ConCeilRampE, ConCeilTubeVertical},
 	},
 
 	17: {

@@ -51,6 +51,7 @@
       <div class="row" style="margin-bottom:8px">
         <label><input type="radio" name="view" value="off" checked> выкл</label>
         <label><input type="radio" name="view" value="robot"> робот</label>
+        <select id="camName" title="камера робота"><option value="main">main</option></select>
         <label><input type="radio" name="view" value="satellite"> спутник</label>
       </div>
       <img id="cam" alt="" style="display:none;max-width:100%;border-radius:4px">
@@ -141,7 +142,8 @@ function render() {
     ['Баллы', `${sc.total}  (снятие ${sc.pick_points}, установка ${sc.place_points}, бонус ${sc.bonus}, логистика ${sc.logistics})`],
     ['Режим', s.config.satellite ? 'со спутником' : 'хардкор (SLAM)'],
     ['Датчики', JSON.stringify(s.config.sensor_cells)],
-    ['Камера', (c => `x=${c.x} y=${c.y} z=${c.z} pitch=${c.pitch} yaw=${c.yaw} fov=${c.fov} ${c.width}×${c.height}`)(s.config.camera)],
+    ...Object.entries({ main: s.config.camera, ...(s.config.cameras || {}) }).map(([n, c]) =>
+      [`Камера ${n}`, `x=${c.x} y=${c.y} z=${c.z} pitch=${c.pitch} yaw=${c.yaw} fov=${c.fov} ${c.width}×${c.height}`]),
     ['Свет', s.config.lighting.lights.map(l => `(${l.x}, ${l.y}, ${l.z})×${l.intensity}`).join(' ') || '—'],
   ]);
   rows(document.getElementById('tele'), s.telemetry.map(t => [t.key, t.value]));
@@ -155,22 +157,42 @@ function render() {
 }
 
 // Кадр перерисовывается, только когда что-то поменялось (рендер идёт на сервере)
-let camKey = '', camBusy = false;
+let camKey = '', camBusy = false, wantedCam = 'main';
+// список камер в выпадающем меню повторяет конфиг (камеры добавляются из Python)
+function syncCameraList() {
+  if (!state) return;
+  const sel = document.getElementById('camName');
+  const names = ['main', ...Object.keys(state.config.cameras || {}).sort()];
+  if (names.join() !== [...sel.options].map(o => o.value).join()) {
+    const cur = sel.value;
+    sel.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join('');
+    sel.value = names.includes(wantedCam) ? wantedCam : names.includes(cur) ? cur : 'main';
+  }
+  sel.style.display = document.querySelector('input[name=view]:checked').value === 'robot' ? '' : 'none';
+}
+document.getElementById('camName').onchange = e => { wantedCam = e.target.value; camKey = ''; updateCamera(); };
 function updateCamera() {
   const view = document.querySelector('input[name=view]:checked').value;
   const el = document.getElementById('cam');
   el.style.display = view === 'off' ? 'none' : 'block';
+  syncCameraList();
   if (view === 'off' || !state || camBusy) return;
-  const key = JSON.stringify([view, state.pose, state.moves, state.config, state.pattern_index, state.route && state.route[0]]);
+  const name = document.getElementById('camName').value;
+  const key = JSON.stringify([view, name, state.pose, state.moves, state.config, state.pattern_index, state.route && state.route[0]]);
   if (key === camKey) return;
   camKey = key; camBusy = true;
   const next = new Image();
   next.onload = next.onerror = () => { el.src = next.src; camBusy = false; };
-  next.src = `/api/camera?view=${view}&source=ui&t=${Date.now()}`;
+  next.src = `/api/camera?view=${view}&name=${encodeURIComponent(name)}&source=ui&t=${Date.now()}`;
 }
 document.querySelectorAll('input[name=view]').forEach(r => r.onchange = () => { camKey = ''; updateCamera(); });
 const hashView = new URLSearchParams(location.hash.slice(1)).get('camera');
-if (hashView) document.querySelectorAll('input[name=view]').forEach(r => r.checked = r.value === hashView);
+// #camera=robot, #camera=satellite или #camera=<имя камеры>
+if (hashView) {
+  const view = ['off', 'robot', 'satellite'].includes(hashView) ? hashView : 'robot';
+  if (view === 'robot' && hashView !== 'robot') wantedCam = hashView;
+  document.querySelectorAll('input[name=view]').forEach(r => r.checked = r.value === view);
+}
 
 async function poll() {
   try { state = await api('/api/state'); render(); updateCamera(); } catch (e) { console.error(e); }

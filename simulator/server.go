@@ -3,11 +3,13 @@ package simulator
 import (
 	"SlamSim/fastgen"
 	"SlamSim/file_operator"
+	"bytes"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"image/png"
+	"io"
 	"io/fs"
 	"math/rand/v2"
 	"net/http"
@@ -194,8 +196,13 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cfg := s.cfg // присланные поля перезаписывают текущие, остальные остаются
-	if err := readJSON(r, &cfg); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		badRequest(w, "bad_json", err.Error())
+		return
+	}
+	cfg, err := mergeConfig(s.cfg, body)
+	if err != nil {
 		badRequest(w, "bad_json", err.Error())
 		return
 	}
@@ -205,6 +212,51 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	s.cfg = cfg
 	writeJSON(w, http.StatusOK, s.cfg)
+}
+
+// mergeConfig накладывает присланный (частичный) конфиг на текущий: поля, которых нет
+// в запросе, остаются. Камеры из "cameras" сливаются по одной: новая камера начинается
+// с настроек по умолчанию, null удаляет камеру.
+func mergeConfig(cur Config, body []byte) (Config, error) {
+	cfg := cur
+	cfg.Cameras = make(map[string]CameraConfig, len(cur.Cameras))
+	for k, v := range cur.Cameras {
+		cfg.Cameras[k] = v
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return cfg, nil
+	}
+	var raw struct {
+		Cameras map[string]json.RawMessage `json:"cameras"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return cfg, err
+	}
+	kept := cfg.Cameras
+	cfg.Cameras = nil // иначе json запишет присланные камеры прямо в kept, без слияния
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
+		return cfg, err
+	}
+	cfg.Cameras = kept
+	for name, msg := range raw.Cameras {
+		if string(bytes.TrimSpace(msg)) == "null" {
+			delete(cfg.Cameras, name)
+			continue
+		}
+		cam, ok := cfg.Cameras[name]
+		if !ok {
+			cam = DefaultCamera()
+		}
+		d := json.NewDecoder(bytes.NewReader(msg))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&cam); err != nil {
+			return cfg, fmt.Errorf("cameras.%s: %w", name, err)
+		}
+		cfg.Cameras[name] = cam
+	}
+	return cfg, nil
 }
 
 func (s *Server) handleCmd(w http.ResponseWriter, r *http.Request) {
@@ -401,7 +453,8 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCamera рендерит кадр камеры робота (view=robot) или «спутника» (view=satellite).
+// handleCamera рендерит кадр камеры робота (view=robot, name — имя камеры, по умолчанию main)
+// или «спутника» (view=satellite).
 // format=png (по умолчанию) или raw — RGB-байты построчно, размеры в X-Width/X-Height.
 func (s *Server) handleCamera(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -413,11 +466,16 @@ func (s *Server) handleCamera(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "satellite_disabled", "камера «спутника» доступна только при satellite=true")
 		return
 	}
+	camCfg, ok := cfg.cameraByName(q.Get("name"))
+	if !ok {
+		s.mu.Unlock()
+		badRequest(w, "unknown_camera", fmt.Sprintf("нет камеры %q, добавьте её через cameras в /api/config", q.Get("name")))
+		return
+	}
 	sc := s.world.buildScene(cfg.Scene, cfg.Lighting)
-	cam := s.world.robotCamera(cfg.Camera)
+	cam := s.world.robotCamera(camCfg)
 	s.mu.Unlock()
 
-	camCfg := cfg.Camera
 	switch view {
 	case "", "robot":
 	case "satellite":

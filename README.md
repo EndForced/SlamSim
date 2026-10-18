@@ -19,7 +19,7 @@
 - [Модель поля и робота](#модель-поля-и-робота)
 - [Библиотека rrosim](#библиотека-rrosim)
   - [Sim](#sim) · [Настройки](#настройки) · [Команды](#команды-робота) · [Датчики](#датчики-observation-и-cell)
-  - [Камера и свет](#камера-и-освещение) · [Телеметрия](#телеметрия) · [Кнопка итерации](#кнопка-новая-итерация)
+  - [Камера и свет](#камера-и-освещение) · [Несколько камер](#несколько-камер) · [Телеметрия](#телеметрия) · [Кнопка итерации](#кнопка-новая-итерация)
   - [Ошибки](#ошибки)
 - [Окно симулятора](#окно-симулятора)
 - [HTTP API](#http-api)
@@ -396,12 +396,13 @@ print("эталон:", sim.reference()["sections"], "секций")
 ### Камера и освещение
 
 ```python
-sim.camera(view="robot", size=None) -> bytes             # PNG
-sim.camera_array(view="robot", size=None) -> np.ndarray  # H×W×3, uint8, RGB (нужен numpy)
-sim.save_camera(path, view="robot", size=None)
+sim.camera(view="robot", size=None, name=None) -> bytes             # PNG
+sim.camera_array(view="robot", size=None, name=None) -> np.ndarray  # H×W×3, uint8, RGB (нужен numpy)
+sim.save_camera(path, view="robot", size=None, name=None)
 ```
 
-`view="robot"` — камера робота. `view="satellite"` — камера в 2,8 м над центром поля с обзором 95°
+`view="robot"` — камера робота: основная или именованная (`name`, см.
+[Несколько камер](#несколько-камер)). `view="satellite"` — камера в 2,8 м над центром поля с обзором 95°
 (п. 7), квадратный кадр стороной `size` (по умолчанию 480), только при `satellite=True`.
 Кадр рендерится на сервере трассировкой лучей. Кадр 320×240 со сглаживанием 2×2 занимает около 30 мс
 на 4 ядрах.
@@ -474,6 +475,52 @@ sim.configure(camera={"x": 0, "y": 0, "z": 150, "pitch": -90, "fov": 60, "width"
 Допущения: отступ сетки от края баннера — 240 мм с каждой стороны; соседние секции по 300 мм
 перекрываются на 20 мм, потому что шаг сетки 280 мм. Высоты подставок в регламенте не указаны,
 они задаются через `scene`.
+
+### Несколько камер
+
+Кроме основной камеры (`main`, настраивается через `camera`), у робота может быть до 8 именованных
+камер: например, передняя, задняя, боковые и камера вниз для линии. У каждой свои положение, углы,
+обзор, размер кадра и эффекты.
+
+```python
+front = sim.get_camera()                          # основная камера "main"
+rear  = sim.add_camera("rear", yaw=180)           # смотрит назад
+left  = sim.add_camera("left", yaw=-90, fov=90, width=160, height=120)
+line  = sim.add_camera("line", x=60, z=120, pitch=-90, fov=60, width=160, height=120)
+
+frames = {c.name: c.array() for c in (front, rear, left, line)}   # numpy-кадры всех камер
+rear.save("rear.png")
+png = left.frame()                                # PNG-байты
+
+left.configure(pitch=-60)                         # меняются только переданные поля
+print(left.config())                              # текущие настройки этой камеры
+print(sim.cameras())                              # {"main": {...}, "rear": {...}, ...}
+
+line.remove()                                     # или sim.remove_camera("line")
+```
+
+| Метод | Описание |
+|---|---|
+| `sim.add_camera(name, **params) -> Camera` | Добавить камеру. Поля, которые не переданы, берутся из настроек по умолчанию. Если камера уже есть, меняются только переданные поля. Имя: латиница, цифры, `_` и `-`, до 32 символов, не `main`. |
+| `sim.get_camera(name="main") -> Camera` | Объект существующей камеры; если её нет — `SimError("unknown_camera")` |
+| `sim.remove_camera(name)` | Удалить камеру (основную удалить нельзя) |
+| `sim.cameras() -> dict` | Настройки всех камер, включая `main` |
+| `Camera.frame()`, `.array()`, `.save(path)` | Кадр этой камеры: PNG, numpy, файл |
+| `Camera.configure(**params)`, `.config()` | Изменить или прочитать настройки этой камеры |
+| `Camera.remove()` | Удалить камеру |
+
+`Camera` — лёгкий объект: он хранит только имя, а настройки живут на сервере. Несколько объектов
+с одним именем управляют одной и той же камерой, а камеры, добавленные из одного скрипта, видны
+в другом. Без объектов то же самое делается через `sim.camera(name="rear")`,
+`sim.camera_array(name="rear")` и `sim.configure(cameras={"rear": {...}, "old": None})`
+(`None` удаляет камеру).
+
+Каждый кадр рендерится отдельным запросом, поэтому кадры с N камер стоят примерно в N раз дороже.
+Для частых кадров уменьшайте `width`/`height` и `aa`. Пока между запросами не было команд,
+все камеры снимают одно и то же состояние поля.
+
+В окне симулятора камера выбирается из выпадающего списка рядом с «робот», или адресом
+`http://127.0.0.1:8080/#camera=rear`.
 
 ### Телеметрия
 
@@ -559,6 +606,7 @@ except IllegalCommand as e:
 - `bad_config` — неверная настройка;
 - `satellite_disabled` — функция режима спутника вызвана без `satellite=True`;
 - `reset_failed` — нет поля с таким номером;
+- `unknown_camera` — нет камеры с таким именем;
 - `bad_json`, `bad_view`.
 
 ## Окно симулятора
@@ -590,8 +638,8 @@ except IllegalCommand as e:
 | `GET /api/scan` | — | observation |
 | `POST /api/reset` | `{"index"?: int, "same"?: bool}` | observation |
 | `GET /api/config` | — | конфиг |
-| `POST /api/config` | частичный конфиг (поля как в `configure`) | конфиг |
-| `GET /api/camera` | `view=robot\|satellite`, `format=png\|raw`, `size` (для спутника) | PNG или RGB-байты построчно; размеры в заголовках `X-Width`, `X-Height` |
+| `POST /api/config` | частичный конфиг (поля как в `configure`); `cameras` сливается по камерам, `null` удаляет камеру | конфиг |
+| `GET /api/camera` | `view=robot\|satellite`, `name` (камера робота, по умолчанию `main`), `format=png\|raw`, `size` (для спутника) | PNG или RGB-байты построчно; размеры в заголовках `X-Width`, `X-Height` |
 | `POST /api/telemetry` | `{"data"?: {...}, "log"?: str, "clear"?: bool}` | `{"ok": true}` |
 | `GET /api/events` | `timeout` — секунды, 0–60 | `{"events": ["iteration", ...]}` (пусто по таймауту) |
 | `POST /api/iterate` | — | нажатие кнопки «Новая итерация» |
