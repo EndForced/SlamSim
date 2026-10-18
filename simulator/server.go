@@ -40,11 +40,12 @@ type Server struct {
 	lastError *CommandError
 	lastPoll  time.Time
 	events    chan string
-	assetsDir string
+	assets    fs.FS
 }
 
-func NewServer(assetsDir string) (*Server, error) {
-	s := &Server{cfg: DefaultConfig(), events: make(chan string, 16), assetsDir: assetsDir}
+// NewServer создаёт сервер; assets — картинки клеток для окна (обычно assets.FS)
+func NewServer(assets fs.FS) (*Server, error) {
+	s := &Server{cfg: DefaultConfig(), events: make(chan string, 16), assets: assets}
 	if err := s.reset(nil, false); err != nil {
 		return nil, err
 	}
@@ -114,7 +115,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	ui, _ := fs.Sub(uiFiles, "ui")
 	mux.Handle("GET /", http.FileServerFS(ui))
-	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(s.assetsDir))))
+	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServerFS(s.assets)))
 
 	mux.HandleFunc("POST /api/reset", s.handleReset)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)

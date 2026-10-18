@@ -1,0 +1,59 @@
+# Релиз по тегу: git tag v0.1.0 && git push origin v0.1.0
+# Собирает бинарники для всех платформ (scripts/release.sh) и публикует GitHub Release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Тесты
+        run: go vet ./... && go test ./...
+
+      - name: Сборка архивов
+        run: scripts/release.sh "${GITHUB_REF_NAME}"
+
+      - name: Публикация релиза
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<NOTES
+          ## Скачать
+
+          | Система | Архив |
+          |---|---|
+          | Windows | \`slamsim_${GITHUB_REF_NAME}_windows_amd64.zip\` |
+          | macOS (Apple Silicon) | \`slamsim_${GITHUB_REF_NAME}_darwin_arm64.tar.gz\` |
+          | macOS (Intel) | \`slamsim_${GITHUB_REF_NAME}_darwin_amd64.tar.gz\` |
+          | Linux | \`slamsim_${GITHUB_REF_NAME}_linux_amd64.tar.gz\` |
+          | Raspberry Pi и др. ARM | \`linux_arm64\` (64-бит) или \`linux_armv7\` (32-бит) |
+          | Только Python-клиент | \`rrosim_${GITHUB_REF_NAME}_python.zip\` |
+
+          ## Запуск
+
+          1. Распакуйте архив.
+          2. Запустите \`slamsim\` (\`slamsim.exe\` в Windows) — окно откроется в браузере, http://127.0.0.1:8080.
+          3. Установите клиент: \`pip install -e python\` из папки архива и запустите свой скрипт, например \`python python/examples/explore.py\`.
+
+          Go устанавливать не нужно. Поля для симулятора: \`slamsim-generate\` дописывает их в \`data/pats.bin\`,
+          без них поле генерируется на лету. Подробности — в README.md внутри архива.
+
+          macOS при первом запуске может не дать открыть файл неизвестного разработчика: откройте его через
+          контекстное меню «Открыть» или выполните \`xattr -d com.apple.quarantine slamsim slamsim-generate\`.
+          NOTES
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "SlamSim ${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            --generate-notes

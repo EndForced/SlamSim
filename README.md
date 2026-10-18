@@ -25,19 +25,20 @@
 - [HTTP API](#http-api)
 - [Поля и генератор](#поля-и-генератор)
 - [Структура репозитория](#структура-репозитория)
+- [Выпуск релиза](#выпуск-релиза)
 
 ## Быстрый старт
 
-Нужны Go 1.25+ и Python 3.9+. Внешних зависимостей нет, `numpy` нужен только для `camera_array()`.
+1. Скачайте архив для своей системы со страницы
+   [Releases](https://github.com/EndForced/SlamSim/releases/latest) и распакуйте его. Go не нужен.
+2. Запустите `slamsim` (в Windows — `slamsim.exe`). Окно симулятора откроется в браузере:
+   http://127.0.0.1:8080.
+3. Нужен Python 3.9+. В папке архива выполните:
 
 ```bash
-go run ./cmd/slamsim                 # сервер и окно: http://127.0.0.1:8080
-pip install -e python                # или добавить папку python/ в sys.path
+pip install -e python                # клиент rrosim, зависимостей нет (numpy — только для camera_array)
 python python/examples/explore.py    # пример: робот едет по нажатию кнопки в окне
 ```
-
-Сервер запускается из корня репозитория: там лежат `data/pats.bin` и `assets/`. Если запуск идёт
-из другого места, путь задаётся флагом: `go run ./cmd/slamsim -root /путь/к/SlamSim -addr 127.0.0.1:8080`.
 
 Минимальная программа:
 
@@ -62,61 +63,75 @@ sim.run()                                      # ждать нажатий кн�
 
 ## Установка и запуск сервера
 
-### 1. Установить Go и Python
+### Вариант 1: готовый релиз (рекомендуется)
 
-- Go 1.25 или новее: https://go.dev/dl/. Проверка: `go version`.
-- Python 3.9 или новее. Проверка: `python --version` (в Linux/macOS — `python3`).
-- Для `camera_array()` нужен numpy: `pip install numpy`. Остальная библиотека работает без зависимостей.
+Со страницы [Releases](https://github.com/EndForced/SlamSim/releases/latest) скачайте архив:
 
-### 2. Получить код
+| Система | Архив |
+|---|---|
+| Windows | `slamsim_<версия>_windows_amd64.zip` (`windows_arm64` — для ARM-ноутбуков) |
+| macOS на Apple Silicon (M1 и новее) | `slamsim_<версия>_darwin_arm64.tar.gz` |
+| macOS на Intel | `slamsim_<версия>_darwin_amd64.tar.gz` |
+| Linux | `slamsim_<версия>_linux_amd64.tar.gz` |
+| Raspberry Pi и другие ARM | `linux_arm64` (64-битная ОС) или `linux_armv7` (32-битная) |
+| Только Python-клиент, например для робота | `rrosim_<версия>_python.zip` |
+
+В архиве лежат:
+- `slamsim` — сервер; окно и картинки встроены в файл;
+- `slamsim-generate` — генератор полей;
+- `python/` — клиент `rrosim` с примерами;
+- `data/` — сюда пишутся поля;
+- `README.md`.
+
+Распакуйте архив и запустите сервер:
+
+```bash
+./slamsim              # Linux/macOS; в Windows — двойной щелчок по slamsim.exe или slamsim.exe в консоли
+```
+
+В консоли появится `SlamSim v… запущен: http://127.0.0.1:8080`, и окно откроется в браузере.
+Остановить сервер — Ctrl+C или закрыть окно консоли. Версию показывает `./slamsim -version`.
+
+Чтобы наполнить поля (по желанию), запустите `./slamsim-generate` (`slamsim-generate.exe`) и введите
+количество, например 10000. Поля дописываются в `data/pats.bin`. Если файл пуст, сервер генерирует
+поле на лету при каждом сбросе, но тогда `reset(index=...)` недоступен.
+
+macOS при первом запуске может заблокировать файл от неизвестного разработчика. Откройте его через
+контекстное меню «Открыть» или снимите карантин: `xattr -d com.apple.quarantine slamsim slamsim-generate`.
+В Linux/macOS, если файл не запускается, выдайте права: `chmod +x slamsim slamsim-generate`.
+
+### Вариант 2: из исходников
+
+Нужен Go 1.25 или новее (https://go.dev/dl/, проверка: `go version`).
 
 ```bash
 git clone https://github.com/EndForced/SlamSim.git
 cd SlamSim
+go run ./cmd/generate                 # по желанию: наполнить data/pats.bin
+go run ./cmd/slamsim                  # сервер и окно
+go build -o slamsim ./cmd/slamsim     # или собрать бинарник (Windows: -o slamsim.exe)
 ```
 
-### 3. Наполнить поля (по желанию)
-
-```bash
-go run ./cmd/generate        # спросит количество, например 10000
-```
-
-Поля дописываются в `data/pats.bin`. Если файл пуст, сервер генерирует поле на лету при каждом
-сбросе, но тогда `reset(index=...)` недоступен.
-
-### 4. Запустить сервер
-
-Для разработки:
-
-```bash
-go run ./cmd/slamsim
-```
-
-Или собрать бинарник один раз и запускать его:
-
-```bash
-go build -o slamsim ./cmd/slamsim       # в Windows: go build -o slamsim.exe ./cmd/slamsim
-./slamsim                               # в Windows: slamsim.exe
-```
-
-В консоли появится `Симулятор запущен: http://127.0.0.1:8080`. Откройте этот адрес в браузере:
-там окно симулятора.
-
-Флаги:
+### Флаги сервера
 
 | Флаг | По умолчанию | Описание |
 |---|---|---|
 | `-addr` | `127.0.0.1:8080` | Адрес и порт HTTP API и окна |
-| `-root` | `.` | Корень репозитория, где лежат `data/pats.bin` и `assets/`. Нужен, если бинарник запускается не из корня. |
+| `-root` | `.` | Папка, в которой лежит (или создаётся) `data/pats.bin` |
+| `-open` | `true` | Открыть окно в браузере при запуске. `-open=false` — не открывать. |
+| `-version` | — | Показать версию и выйти |
 
 ```bash
-./slamsim -addr 127.0.0.1:9000 -root ~/SlamSim
+./slamsim -addr 127.0.0.1:9000 -root ~/SlamSim -open=false
 ```
 
-### 5. Подключить Python
+### Подключить Python
+
+Нужен Python 3.9 или новее (проверка: `python --version`, в Linux/macOS — `python3`).
+Для `camera_array()` дополнительно нужен numpy: `pip install numpy`.
 
 ```bash
-pip install -e python        # из корня репозитория, один раз
+pip install -e python        # из папки архива или репозитория, один раз
 ```
 
 Если ставить пакет не хочется, добавьте папку в путь в начале скрипта:
@@ -153,9 +168,10 @@ sim = Sim("http://192.168.1.50:8080")   # IP компьютера с серве�
 | Симптом | Причина и решение |
 |---|---|
 | `SimError: unavailable: симулятор недоступен` | Сервер не запущен или у `Sim(...)` другой адрес/порт |
-| `address already in use` при запуске | Порт занят, например вторым экземпляром. Закройте его или запустите с `-addr 127.0.0.1:9000` и `Sim("http://127.0.0.1:9000")`. |
-| В окне серые квадраты вместо клеток | Сервер не нашёл `assets/`: запустите из корня репозитория или укажите `-root` |
-| `reset_failed: в data/pats.bin нет полей` | Файл пуст: наполните его через `go run ./cmd/generate` или вызывайте `reset()` без `index` |
+| `не удалось занять 127.0.0.1:8080` при запуске | Порт занят, например вторым экземпляром. Закройте его или запустите с `-addr 127.0.0.1:9000` и `Sim("http://127.0.0.1:9000")`. |
+| Окно не открылось само | Откройте адрес из консоли вручную (на сервере без графики браузер не запустить) |
+| В Windows окно консоли сразу закрывается | Запустите `slamsim.exe` из `cmd`/PowerShell, чтобы увидеть ошибку |
+| `reset_failed: в data/pats.bin нет полей` | Файл пуст: наполните его через `slamsim-generate` или вызывайте `reset()` без `index` |
 | `satellite_disabled` | Функция режима спутника: сначала `sim.configure(satellite=True)` |
 | Индикатор клиента в окне серый | Python-скрипт не дошёл до `sim.run()` или упал, смотрите консоль скрипта |
 | Робот двигается медленно | Это пауза `step_delay_ms` (150 мс) для наглядности, для прогонов ставьте `sim.configure(step_delay_ms=0)` |
@@ -597,7 +613,8 @@ except IllegalCommand as e:
 Поля хранятся в `data/pats.bin`: 144 байта на поле — матрица 8×8 и эталонный маршрут. Наполнить файл:
 
 ```bash
-go run ./cmd/generate     # спросит количество; 100 000 полей — несколько секунд
+./slamsim-generate        # из релиза; из исходников — go run ./cmd/generate
+                          # спросит количество; 100 000 полей — несколько секунд
 ```
 
 Генератор `fastgen` соблюдает правила жеребьёвки:
@@ -611,6 +628,8 @@ go run ./cmd/generate     # спросит количество; 100 000 пол�
 ## Структура репозитория
 
 ```
+.github/workflows/release.yml  сборка и публикация релиза по тегу v*
+scripts/release.sh             сборка архивов под все платформы (можно запускать локально)
 cmd/slamsim/      сервер симулятора
 cmd/generate/     генератор полей в data/pats.bin
 simulator/        модель заезда, HTTP API, рендер камеры, окно (simulator/ui)
@@ -618,10 +637,21 @@ fastgen/          генератор полей и эталонных маршр
 matrixfactory/    модель клеток поля и проездов между ними
 pathfind/         граф для matrixfactory
 file_operator/    формат data/pats.bin
-assets/           картинки клеток для окна
+assets/           картинки клеток для окна (встраиваются в бинарник)
 python/rrosim/    Python-библиотека
 python/examples/  explore.py — пример по кнопке; follow_reference.py — проезд по эталону (проверка)
 ```
 
 Тесты: `go test ./...`. Сквозная проверка через API: запустить сервер, затем
 `python python/examples/follow_reference.py`. Должно получиться 55 баллов и ровно эталонное число секций.
+
+## Выпуск релиза
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+GitHub Actions прогоняет тесты, собирает архивы для Windows, macOS и Linux (amd64/arm64/armv7)
+скриптом `scripts/release.sh` и публикует их на странице Releases вместе с `SHA256SUMS.txt`.
+Локальная сборка тех же архивов: `scripts/release.sh v0.2.0`, результат — в `dist/`.
